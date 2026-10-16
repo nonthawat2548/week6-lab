@@ -11,6 +11,15 @@ import (
 	"moviehub/store"
 )
 
+// สร้างครั้งเดียวตอนเริ่มโปรแกรม เพื่อให้กรณีไม่พบอีเมลยังตรวจ bcrypt
+var dummyHash = func() string {
+	hash, err := auth.HashPassword("ไม่มีใครใช้รหัสนี้")
+	if err != nil {
+		panic(err)
+	}
+	return hash
+}()
+
 type registerReq struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
@@ -67,6 +76,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	m, err := h.Store.MemberByEmail(r.Context(), email)
 	if errors.Is(err, store.ErrNotFound) {
+		auth.CheckPassword(dummyHash, req.Password)
 		writeError(w, http.StatusUnauthorized, "BAD_CREDENTIALS", "อีเมลหรือรหัสผ่านไม่ถูกต้อง")
 		return
 	}

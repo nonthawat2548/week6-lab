@@ -30,8 +30,8 @@ func main() {
 		}
 		secret = strings.TrimSpace(string(data))
 	}
-	if len(secret) <= 32 {
-		log.Fatal("JWT_SECRET ต้องยาวกว่า 32 ตัวอักษร")
+	if len(secret) < 32 {
+		log.Fatal("JWT_SECRET ต้องยาวอย่างน้อย 32 ตัวอักษร")
 	}
 	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
@@ -45,12 +45,7 @@ func main() {
 	tickets := &auth.Issuer{Secret: []byte(secret), TTL: time.Hour}
 	h := &handler.Handler{Store: &store.Store{Pool: pool}, Tickets: tickets}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/auth/register", h.Register)
-	mux.HandleFunc("POST /api/auth/login", h.Login)
-	mux.HandleFunc("GET /api/movies", h.SearchMovies)
-	mux.HandleFunc("GET /api/movies/{id}", h.GetMovie)
-	mux.HandleFunc("GET /api/movies/{id}/reviews", h.ListReviews)
+	mux := newMux(h)
 
 	origins := strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",")
 	port := os.Getenv("PORT")
@@ -60,4 +55,24 @@ func main() {
 	addr := "0.0.0.0:" + port
 	log.Println("MovieHub API ฟังอยู่ที่", addr, "ต้อนรับ", origins)
 	log.Fatal(http.ListenAndServe(addr, mw.Logging(mw.CORS(origins, mux))))
+}
+
+func newMux(h *handler.Handler) *http.ServeMux {
+	login := func(f http.HandlerFunc) http.HandlerFunc { return mw.RequireLogin(h.Tickets, f) }
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/auth/register", h.Register)
+	mux.HandleFunc("POST /api/auth/login", h.Login)
+	mux.HandleFunc("GET /api/movies", h.SearchMovies)
+	mux.HandleFunc("GET /api/movies/{id}", h.GetMovie)
+	mux.HandleFunc("GET /api/movies/{id}/reviews", h.ListReviews)
+	mux.HandleFunc("GET /api/me", login(h.Me))
+	mux.HandleFunc("POST /api/movies/{id}/reviews", login(h.AddReview))
+	mux.HandleFunc("DELETE /api/reviews/{reviewId}", login(h.DeleteReview))
+	mux.HandleFunc("GET /api/admin/members", login(mw.RequireRole("admin", h.AdminMembers)))
+	mux.HandleFunc("GET /api/me/wishlist", login(h.ListWishlist))
+	mux.HandleFunc("PUT /api/me/wishlist/{movieId}", login(h.PutWishlist))
+	mux.HandleFunc("DELETE /api/me/wishlist/{movieId}", login(h.DeleteWishlist))
+	mux.HandleFunc("PUT /api/movies/{id}/vote", login(h.PutVote))
+	mux.HandleFunc("DELETE /api/movies/{id}/vote", login(h.DeleteVote))
+	return mux
 }
